@@ -426,3 +426,11 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
