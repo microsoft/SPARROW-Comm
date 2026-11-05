@@ -110,6 +110,21 @@ docker compose -f docker/compose.yml down -v
 
 The secrets in that file are fixed development values.
 
+### Comparing with Sparrow Studio
+
+With a Sparrow Studio checkout, `docker/parity.compose.yml` runs Studio's device and Reconyx
+server next to sparrow-comm. `docker/parity.py` sends both the same 48 requests and compares
+status codes and response bodies. Values generated per server, such as ids, tokens and
+timestamps, are masked. The script exits 1 on any unexpected difference. It lists two inputs
+on which Studio returns HTTP 500 as known Studio defects.
+
+```bash
+export STUDIO_DIR=/path/to/sparrow-studio
+docker compose -f docker/parity.compose.yml up -d --build --wait
+docker compose -f docker/parity.compose.yml --profile parity run --rm --build parity
+docker compose -f docker/parity.compose.yml down -v
+```
+
 ## Development
 
 ```bash

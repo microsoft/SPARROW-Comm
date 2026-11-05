@@ -15,6 +15,6 @@ CMD ["serve", "api"]
 
 # Simulator image for the local stack (docker/compose.yml); not for production.
 FROM base AS sim
-RUN uv pip install --python /opt/venv/bin/python httpx
-COPY docker/selfsigned.py docker/simulate.py /app/docker/
+RUN uv pip install --python /opt/venv/bin/python httpx "psycopg[binary]"
+COPY docker/selfsigned.py docker/simulate.py docker/parity.py /app/docker/
 ENTRYPOINT ["python"]

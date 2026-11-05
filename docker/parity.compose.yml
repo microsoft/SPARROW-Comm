@@ -1,0 +1,68 @@
+# Side-by-side parity check: Sparrow Studio's device/Reconyx server and sparrow-comm receive the
+# same requests; docker/parity.py compares status codes and response bodies.
+#   STUDIO_DIR=/path/to/sparrow-studio docker compose -f docker/parity.compose.yml up -d --build --wait
+#   STUDIO_DIR=/path/to/sparrow-studio docker compose -f docker/parity.compose.yml run --rm parity
+#   STUDIO_DIR=/path/to/sparrow-studio docker compose -f docker/parity.compose.yml down -v
+# Studio's database starts empty from its own db/schema; secrets are fixed development values.
+x-comm-env: &comm-env
+  SPARROW_COMM_SECRET_KEY: "ZGV2LW9ubHktZmVybmV0LWtleS1kby1ub3QtdXNlLTA="
+  SPARROW_COMM_JWT_SECRET: "dev-only-jwt-secret"
+
+services:
+  studio-db:
+    image: postgres:16-alpine
+    environment: {POSTGRES_DB: sparrow, POSTGRES_USER: sparrow, POSTGRES_PASSWORD: dev-only}
+    volumes: ["${STUDIO_DIR:?set STUDIO_DIR to a Sparrow Studio checkout}/db/schema:/docker-entrypoint-initdb.d:ro"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sparrow -d sparrow"]
+      interval: 3s
+      retries: 30
+
+  studio-api:
+    build: {context: "${STUDIO_DIR}/server", dockerfile: build/Dockerfile}
+    image: sparrow-studio-server:parity
+    environment:
+      DB_DRIVER: postgres
+      DB_HOST: studio-db
+      DB_PORT: "5432"
+      DB_USER: sparrow
+      DB_PASSWORD: dev-only
+      DB_NAME: sparrow
+      STORAGE_BACKEND: local
+      DATA_DIR: /data
+      STAGING_DIR: /data/staging
+      RECONYX_JWT_SECRET: "dev-only-jwt-secret"
+    depends_on: {studio-db: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/docs')"]
+      interval: 3s
+      retries: 30
+
+  comm-api:
+    build: {context: .., target: base}
+    image: sparrow-comm:dev
+    environment: *comm-env
+    volumes: [comm-state:/var/lib/sparrow-comm]
+    command: ["serve", "api", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      retries: 20
+
+  parity:
+    profiles: [parity]
+    build: {context: .., target: sim}
+    image: sparrow-comm:sim
+    environment:
+      <<: *comm-env
+      STUDIO_URL: http://studio-api:8080
+      COMM_URL: http://comm-api:8000
+      STUDIO_DSN: postgresql://sparrow:dev-only@studio-db:5432/sparrow
+    volumes: [comm-state:/var/lib/sparrow-comm]
+    command: ["/app/docker/parity.py"]
+    depends_on:
+      studio-api: {condition: service_healthy}
+      comm-api: {condition: service_healthy}
+
+volumes:
+  comm-state:
