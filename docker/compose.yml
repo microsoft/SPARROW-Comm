@@ -1,0 +1,74 @@
+# Local development stack: every receive channel plus simulators.
+#   docker compose -f docker/compose.yml up -d --build
+#   docker compose -f docker/compose.yml run --rm sim
+# Secrets below are fixed development values. Do not reuse them anywhere else.
+x-common: &common
+  build: {context: .., target: base}
+  image: sparrow-comm:dev
+  volumes: [state:/var/lib/sparrow-comm, certs:/certs]
+  environment:
+    SPARROW_COMM_SECRET_KEY: "ZGV2LW9ubHktZmVybmV0LWtleS1kby1ub3QtdXNlLTA="
+    SPARROW_COMM_JWT_SECRET: "dev-only-jwt-secret"
+    CERT_FILE: /certs/cert.pem
+    KEY_FILE: /certs/key.pem
+  restart: unless-stopped
+
+services:
+  certs:
+    build: {context: .., target: sim}
+    image: sparrow-comm:sim
+    volumes: [certs:/certs]
+    command: ["/app/docker/selfsigned.py", "/certs"]
+    restart: "no"
+
+  api:
+    <<: *common
+    command: ["serve", "api", "--port", "8000"]
+    ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      retries: 10
+
+  ftps:
+    <<: *common
+    command: ["serve", "ftps", "--port", "2121", "--passive-ports", "51000-51010", "--masquerade", "127.0.0.1"]
+    ports: ["127.0.0.1:2121:2121", "127.0.0.1:51000-51010:51000-51010"]
+    depends_on: {certs: {condition: service_completed_successfully}}
+
+  poll-ftps:
+    <<: *common
+    command: ["poll", "ftps", "--every", "5"]
+
+  greenmail:
+    image: greenmail/standalone:2.1.3
+    environment:
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.imap -Dgreenmail.hostname=0.0.0.0
+        -Dgreenmail.users=cam:campw@sparrow.test -Dgreenmail.users.login=email -Dgreenmail.verbose
+    ports: ["127.0.0.1:3025:3025", "127.0.0.1:3143:3143"]
+
+  poll-imap:
+    <<: *common
+    command: ["poll", "imap", "--host", "greenmail", "--port", "3143", "--no-ssl", "--every", "5"]
+    depends_on: [greenmail]
+
+  sim:
+    <<: *common
+    image: sparrow-comm:sim
+    build: {context: .., target: sim}
+    profiles: [sim]
+    command: ["/app/docker/simulate.py"]
+    restart: "no"
+    environment:
+      SPARROW_COMM_SECRET_KEY: "ZGV2LW9ubHktZmVybmV0LWtleS1kby1ub3QtdXNlLTA="
+      API_URL: http://api:8000
+      FTPS_HOST: ftps
+      FTPS_PORT: "2121"
+      SMTP_HOST: greenmail
+      SMTP_PORT: "3025"
+    depends_on: {api: {condition: service_healthy}, ftps: {condition: service_started}}
+
+volumes:
+  state:
+  certs:
